@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=KaramWS
+GenericName=Web Scraper
+Comment=Save the articles of a page, a section or a whole website as Markdown files
+Exec=karamws-gui
+Icon=io.github.AbuKaram01.KaramWS
+Terminal=false
+Categories=Network;Utility;
+Keywords=scraper;articles;blog;download;markdown;
+StartupNotify=true

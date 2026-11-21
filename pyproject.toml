@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "KaramWS"
+version = "0.1.0"
+description = "Save the articles of a page, a section or a whole website as Markdown files. Karam Web Scraper."
+readme = "README.md"
+authors = [{ name = "AbuKaram01", email = "abukaram01@proton.me" }]
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "trafilatura>=2.0",
+    "httpx>=0.27",
+    # Renders the pages that only show their content after JavaScript runs. The installers also carry Chromium.
+    "playwright>=1.40",
+    # PyGObject is best installed as a system package on Linux (see README)
+    # rather than through pip: it binds to your system's GTK/GObject-
+    # Introspection libraries, which pip alone cannot provide.
+    # On Windows there is no wheel on PyPI and the sdist cannot be built by pip alone; the
+    # gvsbuild-built wheel is installed by scripts/install-windows.ps1 instead.
+    "PyGObject; sys_platform != 'win32'",
+]
+
+[project.scripts]
+karamws = "karamws.cli:main"
+karamws-gui = "karamws.gui.application:main"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# GTK has to be told which version to load before gi.repository is imported, so these imports cannot come first.
+"src/karamws/gui/**" = ["E402"]

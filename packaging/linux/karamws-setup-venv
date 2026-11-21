@@ -1,0 +1,55 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 AbuKaram01
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Creates (or rebuilds) KaramWS's private Python environment in /opt/karamws/venv, installs the app into it and
+# downloads the Chromium that Playwright drives into /opt/karamws/browsers. Run by the package's install script
+# (.deb, .rpm and Arch alike) and by the pacman hook after a Python upgrade; safe to run by hand:
+#
+#     sudo /usr/lib/karamws/setup-venv
+#
+#   (no argument)           create the environment if it is missing, and (re)install the app
+#   --if-python-changed     do nothing unless the system Python's minor version (3.13 -> 3.14)
+#                           differs from the one the environment was made with
+#
+# Needs internet access. KARAMWS_APP_DIR / KARAMWS_PYTHON exist only so this can be tested away from /opt.
+set -eu
+
+APP_DIR="${KARAMWS_APP_DIR:-/opt/karamws}"
+PYTHON="${KARAMWS_PYTHON:-python3}"
+VENV_DIR="$APP_DIR/venv"
+BROWSERS_DIR="$APP_DIR/browsers"
+
+system_version="$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+venv_version=""
+if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
+    venv_version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$VENV_DIR/pyvenv.cfg" | head -n 1)"
+fi
+
+if [ "${1:-}" = "--if-python-changed" ]; then
+    [ -d "$VENV_DIR" ] || exit 0
+    [ "$venv_version" = "$system_version" ] && exit 0
+    echo ":: KaramWS: the system Python changed (${venv_version:-unknown} -> $system_version); rebuilding its environment."
+fi
+
+# An environment made by a different Python can't be reused (its packages live in a
+# version-specific folder), so start over rather than patch it up.
+if [ -d "$VENV_DIR" ] && [ "$venv_version" != "$system_version" ]; then
+    rm -rf "$VENV_DIR"
+fi
+
+echo ":: KaramWS: setting up its Python environment (needs internet access; the first time can take a few minutes)."
+[ -d "$VENV_DIR" ] || "$PYTHON" -m venv --system-site-packages "$VENV_DIR"
+"$VENV_DIR/bin/pip" install --upgrade pip --quiet
+"$VENV_DIR/bin/pip" install --quiet "$APP_DIR/src"
+
+# The Chromium for pages that only show their content after JavaScript runs. It lives beside the environment, which
+# is where the program looks for it (karamws.core.paths), so nothing else has to be configured.
+echo ":: KaramWS: downloading the browser it uses for JavaScript pages (Chromium)."
+if PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR" "$VENV_DIR/bin/python3" -m playwright install chromium; then
+    chmod -R a+rX "$BROWSERS_DIR"
+else
+    echo ":: KaramWS: WARNING: Chromium could not be downloaded. KaramWS works without it, except for pages that"
+    echo "   need JavaScript. Try again later with: sudo /usr/lib/karamws/setup-venv"
+fi
+echo ":: KaramWS is ready. Find it in your applications menu, or run: karamws-gui"

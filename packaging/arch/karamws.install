@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 AbuKaram01
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+post_install() {
+    # A failure here must not abort the pacman transaction (the package files are already
+    # in place); say what to do instead.
+    if ! /usr/lib/karamws/setup-venv; then
+        echo "==> WARNING: KaramWS's Python environment could not be set up."
+        echo "    Fix the cause (internet connection?) and run:"
+        echo "        sudo /usr/lib/karamws/setup-venv"
+    fi
+}
+
+# New app code was just installed: put it into the environment too.
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    # pacman removed the package's files; what remains is the venv, the browser and pip's build files.
+    rm -rf /opt/karamws
+}

@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: 2026 AbuKaram01
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Maintainer: AbuKaram01 <abukaram01@proton.me>
+#
+# Local builds: packaging/build-arch.sh makes the source tarball from your checkout (laid out
+# like GitHub's release archive) and runs makepkg here. For the AUR, tag a release on GitHub,
+# replace 'SKIP' with the tarball's sha256 (makepkg -g) and generate .SRCINFO with:
+#     makepkg --printsrcinfo > .SRCINFO
+#
+# Like the .deb/.rpm, no Python dependencies are bundled: on install, a private venv is
+# created in /opt/karamws/venv, the app is pip-installed there and Chromium is downloaded into
+# /opt/karamws/browsers. That needs internet access. It is redone automatically when Arch
+# upgrades Python to a new minor version (see karamws.hook), since a venv can't survive that.
+#
+# Keep pkgver in sync with __version__ in src/karamws/__init__.py (build-arch.sh checks).
+
+pkgname=karamws
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Karam Web Scraper - save the articles of a page, a section or a whole website as Markdown'
+arch=('x86_64')
+url='https://github.com/AbuKaram01/KaramWS'
+license=('AGPL-3.0-or-later')
+options=('!strip' '!debug')
+makedepends=('python')
+# GitHub names the folder inside a release archive after the repository, not the package.
+_srcdir="KaramWS-$pkgver"
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+depends=(
+    'python'
+    'python-pip'
+    'python-gobject'
+    'gtk4'
+    'libadwaita'
+    'librsvg'
+    'adwaita-icon-theme'
+    # what the Chromium that Playwright downloads needs from the system
+    'nss' 'nspr' 'alsa-lib' 'at-spi2-core' 'libcups' 'libdrm' 'mesa'
+    'libxcomposite' 'libxdamage' 'libxfixes' 'libxrandr' 'libxkbcommon' 'pango' 'cairo'
+)
+
+install=karamws.install
+
+check() {
+    cd "$srcdir/$_srcdir"
+    python -m compileall -q src
+}
+
+package() {
+    local root="$srcdir/$_srcdir" app_id=io.github.AbuKaram01.KaramWS
+
+    # pip builds from this folder, so everything pyproject.toml refers to must be here.
+    install -d "$pkgdir/opt/karamws/src"
+    cp -r "$root/src" "$root/pyproject.toml" "$root/README.md" "$root/LICENSE" "$pkgdir/opt/karamws/src/"
+    find "$pkgdir/opt/karamws/src" -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+    install -d "$pkgdir/usr/bin"
+    cat > "$pkgdir/usr/bin/karamws-gui" << 'LAUNCHER'
+#!/bin/sh
+# A package always installs to the same place, so this path is always right.
+exec /opt/karamws/venv/bin/python3 -m karamws.gui "$@"
+LAUNCHER
+    cat > "$pkgdir/usr/bin/karamws" << 'LAUNCHER'
+#!/bin/sh
+exec /opt/karamws/venv/bin/python3 -m karamws "$@"
+LAUNCHER
+    chmod 755 "$pkgdir/usr/bin/karamws-gui" "$pkgdir/usr/bin/karamws"
+
+    install -Dm644 "$root/data/$app_id.desktop" "$pkgdir/usr/share/applications/$app_id.desktop"
+    install -d "$pkgdir/usr/share/icons"
+    cp -r "$root/data/icons/hicolor" "$pkgdir/usr/share/icons/"
+
+    install -Dm755 "$root/packaging/linux/karamws-setup-venv" "$pkgdir/usr/lib/karamws/setup-venv"
+    install -Dm644 "$root/packaging/arch/karamws.hook" "$pkgdir/usr/share/libalpm/hooks/karamws-python.hook"
+    install -Dm644 "$root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # whatever umask the archive was unpacked under: dirs 755, files 644 (scripts above are 755)
+    find "$pkgdir/opt" "$pkgdir/usr/share/icons" -type d -exec chmod 755 {} +
+    find "$pkgdir/opt" "$pkgdir/usr/share/icons" -type f -exec chmod 644 {} +
+}
