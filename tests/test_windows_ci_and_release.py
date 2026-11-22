@@ -57,6 +57,8 @@ def test_the_linux_package_is_installed_and_used_in_ci_with_nothing_configured()
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     job = ci.split("  linux-package:")[1].split("  windows-core:")[0]
     assert "./packaging/build.sh" in job and "apt-get install -y ./packaging/dist/karamws_" in job
+    # The runner's package lists can be stale (a 404 for a dependency in a real run): refresh them first.
+    assert job.index("sudo apt-get update") < job.index("apt-get install -y ./packaging/dist/karamws_")
     # The program has to find the Chromium of the package by itself.
     assert "env -u PLAYWRIGHT_BROWSERS_PATH karamws" in job
     assert "test ! -e /opt/karamws" in job  # Removing it leaves nothing behind.

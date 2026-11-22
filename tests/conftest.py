@@ -10,6 +10,12 @@ import pytest
 
 from karamws import winsupport
 
+# On Windows the DLLs of the GTK runtime are not on the DLL search path until the program registers them, so `import gi`
+# fails with "DLL load failed while importing _gi" in any test module that imports it before something else has called
+# this (what happened when the first GUI test module collected imported gi directly). Done here, before any test module
+# is imported, so the result does not depend on the order the modules are collected in. A no-op off Windows.
+winsupport.prepare_runtime()
+
 
 @pytest.fixture(autouse=True)
 def private_user_folders(tmp_path, monkeypatch):

@@ -44,7 +44,11 @@ jobs:
       - name: Build the .deb
         run: ./packaging/build.sh
       - name: Install it
-        run: sudo apt-get install -y ./packaging/dist/karamws_*_amd64.deb
+        # The runner's package lists can be older than the archive: without the update, apt asks for a version of a
+        # dependency that no longer exists and fails with a 404.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./packaging/dist/karamws_*_amd64.deb
       - name: The environment and the browser are where the program looks for them
         run: |
           karamws --version

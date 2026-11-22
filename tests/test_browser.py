@@ -43,13 +43,23 @@ def test_a_folder_without_the_headless_chromium_does_not_count(tmp_path, monkeyp
 
 def test_playwrights_own_folder_makes_it_ready_too(tmp_path, monkeypatch):
     installation(tmp_path, monkeypatch)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     monkeypatch.delenv(paths.BROWSERS_ENV, raising=False)
-    monkeypatch.setattr(paths, "is_windows", lambda: False)
-    monkeypatch.setattr(browser, "is_windows", lambda: False)
+    # Where Playwright keeps its browsers by default: under the cache folder on Linux, under LOCALAPPDATA on Windows.
+    # The test names both, so that it means the same on either system.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     assert not browser.chromium_ready()
-    make_chromium(tmp_path / "home" / ".cache" / "ms-playwright")
+    default_folder = tmp_path / ("local" if paths.is_windows() else "cache") / "ms-playwright"
+    make_chromium(default_folder)
+    assert browser.chromium_ready()
+
+
+def test_a_browsers_folder_named_by_the_user_is_the_one_that_counts(tmp_path, monkeypatch):
+    installation(tmp_path, monkeypatch)
+    explicit = tmp_path / "my-browsers"
+    monkeypatch.setenv(paths.BROWSERS_ENV, str(explicit))
+    assert not browser.chromium_ready()
+    make_chromium(explicit)
     assert browser.chromium_ready()
 
 
