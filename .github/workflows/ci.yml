@@ -4,7 +4,7 @@
 # Continuous integration.
 #
 #   Every push and pull request:  linux, linux-package, windows-core, windows-gtk, installer
-#   Manual only (Actions > CI > Run workflow):  windows-installer-run
+#   Manual only (Actions > CI > Run workflow):  windows-installer-run, windows-full-install
 
 name: CI
 
@@ -29,7 +29,7 @@ jobs:
       - name: Python environment
         run: |
           python3 -m venv --system-site-packages .venv
-          .venv/bin/pip install pytest trafilatura httpx playwright
+          .venv/bin/pip install pytest pyyaml trafilatura httpx playwright
           .venv/bin/pip install --no-deps -e .
       - run: GSK_RENDERER=cairo xvfb-run -a .venv/bin/pytest -q
 
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest trafilatura httpx playwright
+      - run: pip install pytest pyyaml trafilatura httpx playwright
       - run: pip install --no-deps -e .
       - run: pytest -q
 
@@ -295,4 +295,276 @@ jobs:
         with:
           name: dll-scan
           path: ${{ runner.temp }}/dll-scan.json
+          if-no-files-found: ignore
+
+  # Manual only. The install script on a machine with nothing of its own: no installer carries anything, so it
+  # downloads the GTK runtime, takes the runner's Python and fetches Chromium itself. Then checks, with the real
+  # libraries, what a user gets: the Start menu entry, a real scrape of a small site (Arabic titles, a section with two
+  # pages, a page made by JavaScript read with the Chromium the script downloaded), the same with Arabic letters in
+  # every path (a Windows user name, TEMP, the settings, the browser folder and the output folder), the whole test
+  # suite, and the application itself launched with each renderer, with screenshots.
+  windows-full-install:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install everything (GTK, the libraries and Chromium are downloaded)
+        id: install
+        shell: pwsh
+        run: ./scripts/install-windows.ps1 -PythonVersion 3.14
+      - name: The libraries import
+        shell: pwsh
+        run: >
+          .venv\Scripts\python.exe -c "import sys, importlib.metadata as meta;
+          import trafilatura, httpx, lxml.etree, regex, greenlet;
+          from playwright.sync_api import sync_playwright;
+          print('python', sys.version);
+          print([name + ' ' + meta.version(name) for name in ('trafilatura', 'httpx', 'lxml', 'playwright')])"
+      - name: The Start menu entry points at something that exists
+        shell: pwsh
+        run: |
+          $link = Join-Path ([Environment]::GetFolderPath('Programs')) 'KaramWS.lnk'
+          if (-not (Test-Path $link)) { throw "Start menu entry missing: $link" }
+          $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
+          "Target:    $($shortcut.TargetPath)"
+          "Arguments: $($shortcut.Arguments)"
+          "Icon:      $($shortcut.IconLocation)"
+          if (-not (Test-Path $shortcut.TargetPath)) { throw 'The shortcut target does not exist.' }
+      - name: Chromium came with the install script, beside the environment, and renders JavaScript
+        shell: pwsh
+        run: |
+          $browsers = Join-Path (Get-Location) 'browsers'
+          if (-not (Get-ChildItem $browsers -Directory -Filter 'chromium_headless_shell-*' -ErrorAction SilentlyContinue)) {
+              throw "The install script did not download Chromium into $browsers."
+          }
+          @'
+          import sys
+          from karamws import winsupport
+
+          winsupport.prepare_runtime()
+          from karamws.core import ScraperConfig
+          from karamws.core.browser import chromium_home
+          from karamws.core.fetching import BrowserFetcher
+
+          page = ("data:text/html,<html><body><div id=a>empty</div>"
+                  "<script>document.getElementById('a').textContent='rendered by javascript'</script></body></html>")
+          fetcher = BrowserFetcher(ScraperConfig())
+          try:
+              html = fetcher.fetch(page)
+          finally:
+              fetcher.close()
+          print("chromium home:", chromium_home())
+          assert "rendered by javascript" in html, html
+          print("a JavaScript page is rendered with the Chromium the install script downloaded")
+          '@ | Set-Content browser_smoke.py -Encoding utf8
+          .venv\Scripts\python.exe browser_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'The program could not render a JavaScript page with its Chromium.' }
+      - name: A real scrape on Windows (a small site with Arabic titles, a section and a JavaScript page)
+        shell: pwsh
+        run: |
+          $python = (Resolve-Path .venv\Scripts\python.exe).Path
+          $site = Join-Path $env:RUNNER_TEMP 'site'
+          $out = Join-Path $env:RUNNER_TEMP 'articles'
+          @'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          ARTICLE = "\u0645\u0642\u0627\u0644"  # the Arabic word for "article"
+          TEXT = ("\u0647\u0630\u0647 \u0641\u0642\u0631\u0629 "
+                  "This paragraph is long enough to count as the text of an article. ") * 4
+
+
+          def page(path, html):
+              target = root / path / "index.html"
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(html, encoding="utf-8")
+
+
+          def article(title):
+              return (f"<html><head><title>{title}</title></head><body><nav><a href='/'>home</a></nav>"
+                      f"<article><h1>{title}</h1><p>{TEXT}</p><p>{TEXT}</p></article><footer>footer</footer></body></html>")
+
+
+          def listing(names):
+              cards = "".join(f"<article><h2><a href='/2026/{n}/'>{ARTICLE} {n}</a></h2></article>" for n in names)
+              return f"<html><head><title>news</title></head><body>{cards}</body></html>"
+
+
+          for name in ("one", "two", "three"):
+              page(f"2026/{name}", article(f"{ARTICLE} {name}"))
+          page("category/news", listing(["one", "two"]))
+          page("category/news/page/2", listing(["three"]))
+          shell = json.dumps(f"<article><h1>{ARTICLE} js</h1><p>{TEXT}</p><p>{TEXT}</p></article>")
+          page("js/post", f"<html><head><title>{ARTICLE} js</title></head><body><div id='app'></div>"
+                          f"<script>document.getElementById('app').innerHTML = {shell};</script></body></html>")
+          print("site built in", root)
+          '@ | Set-Content build_site.py -Encoding utf8
+          & $python build_site.py $site
+          $server = Start-Process -FilePath $python -PassThru -WindowStyle Hidden `
+              -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $site
+          Start-Sleep -Seconds 3
+          try {
+              $runs = @(
+                  @('http://127.0.0.1:8765/2026/one/', '--kind', 'article'),
+                  @('http://127.0.0.1:8765/category/news/'),
+                  @('http://127.0.0.1:8765/js/post/', '--kind', 'article')
+              )
+              foreach ($run in $runs) {
+                  & $python -m karamws @run --delay 0 -o $out
+                  if ($LASTEXITCODE -ne 0) { throw "karamws failed for $($run[0]) (exit code $LASTEXITCODE)" }
+              }
+              $files = @(Get-ChildItem (Join-Path $out '127.0.0.1') -Filter *.md)
+              "$($files.Count) articles saved:"
+              $files | ForEach-Object { '  ' + $_.Name }
+              if ($files.Count -ne 4) { throw "Expected four articles (one, two, three and the JavaScript one), got $($files.Count)." }
+              if (-not ($files | Where-Object { $_.Name -cmatch '[^\x00-\x7F]' })) {
+                  throw 'The file names lost the Arabic letters of the titles.'
+              }
+          } finally {
+              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Arabic letters in every path (a Windows user name, TEMP, the settings, Chromium and the output folder)
+        shell: pwsh
+        run: |
+          # Many users of this program have Arabic letters in their Windows user name, so in TEMP, in the folders of
+          # their settings and everywhere else the program or the browser it drives has to put a file. Here every one of
+          # them is a folder with Arabic letters, Chromium itself is copied into one and the articles go to another.
+          $python = (Resolve-Path .venv\Scripts\python.exe).Path
+          $arabic = Join-Path $env:RUNNER_TEMP ([string]::Join('', [char[]](0x0623, 0x062D, 0x0645, 0x062F)))
+          New-Item -ItemType Directory -Force "$arabic\Temp", "$arabic\data", "$arabic\config" | Out-Null
+          Copy-Item (Join-Path (Get-Location) 'browsers') "$arabic\browsers" -Recurse
+          $site = Join-Path $env:RUNNER_TEMP 'site'
+          @'
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.stdout.reconfigure(errors="backslashreplace")  # the console of a CI runner is cp1252
+
+          from karamws import winsupport
+
+          winsupport.prepare_runtime()  # what the application does first
+
+          from karamws.config import AppConfig
+          from karamws.core import ScrapeStatus, ScraperConfig, build_scraper
+          from karamws.core.history import HistoryStore, new_entry
+          from karamws.core.paths import data_dir
+
+          arabic = Path(os.environ["ARABIC_FOLDER"])
+          problems = []
+
+
+          def expect(condition, message):
+              print(("ok   " if condition else "FAIL ") + message)
+              if not condition:
+                  problems.append(message)
+
+
+          expect(not os.environ["TEMP"].isascii(), "TEMP has Arabic letters")
+          expect(not str(data_dir()).isascii(), "the data folder has Arabic letters")
+          expect(not os.environ["PLAYWRIGHT_BROWSERS_PATH"].isascii(), "Chromium is in a folder with Arabic letters")
+
+          # The settings and the history are kept in Arabic folders.
+          output = arabic / "articles"
+          AppConfig(output_dir=str(output)).save()
+          expect(AppConfig.load().output_dir == str(output), "the settings are saved and read back")
+          store = HistoryStore()
+          store.add(new_entry("http://127.0.0.1:8765/", "auto", str(output), 1, 0, 0, "done"), keep=10)
+          expect(len(store.entries()) == 1 and store.entries()[0].output_dir == str(output), "the history is saved and read back")
+
+          # Articles with Arabic titles are saved into an Arabic folder, one of them through Chromium from an Arabic folder.
+          config = ScraperConfig(request_delay_seconds=0, respect_robots=False)
+          with build_scraper(output, config) as scraper:
+              events = list(scraper.scrape("http://127.0.0.1:8765/category/news/"))
+              events += list(scraper.scrape("http://127.0.0.1:8765/js/post/"))
+          for event in events:
+              print(event.status.value, event.url, event.detail)
+          expect(not [e for e in events if e.status is ScrapeStatus.FAILED], "no article failed")
+          files = list((output / "127.0.0.1").glob("*.md"))
+          expect(len(files) == 4, f"four articles were saved ({len(files)})")
+          expect(all(not f.name.isascii() for f in files), "the file names keep their Arabic letters")
+          expect(all("This paragraph is long enough" in f.read_text(encoding="utf-8") for f in files), "the text of each is there")
+
+          sys.exit(1 if problems else 0)
+          '@ | Set-Content arabic_smoke.py -Encoding utf8
+          $env:ARABIC_FOLDER = $arabic
+          $env:TEMP = "$arabic\Temp"
+          $env:TMP = $env:TEMP
+          $env:XDG_DATA_HOME = "$arabic\data"
+          $env:XDG_CONFIG_HOME = "$arabic\config"
+          $env:PLAYWRIGHT_BROWSERS_PATH = "$arabic\browsers"
+          $server = Start-Process -FilePath $python -PassThru -WindowStyle Hidden `
+              -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $site
+          Start-Sleep -Seconds 3
+          try {
+              & $python arabic_smoke.py
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'Something does not work with Arabic letters in the paths; the list above says what.'
+              }
+          } finally {
+              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Test suite with the real libraries and the real browser
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          .venv\Scripts\python.exe -m pip install --quiet pytest
+          .venv\Scripts\python.exe -m pytest -q
+      - name: Launch the application
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force screenshots | Out-Null
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $python = (Resolve-Path .venv\Scripts\pythonw.exe).Path
+          $failed = $false
+          foreach ($renderer in 'default', 'cairo') {
+              if ($renderer -eq 'cairo') {
+                  $env:GSK_RENDERER = 'cairo'
+              } else {
+                  Remove-Item Env:GSK_RENDERER -ErrorAction SilentlyContinue
+              }
+              $process = Start-Process -FilePath $python -ArgumentList '-m', 'karamws.gui' -PassThru
+              Start-Sleep -Seconds 20
+              if ($process.HasExited) {
+                  Write-Host "[$renderer] the application exited early with code $($process.ExitCode)"
+                  $failed = $true
+              } else {
+                  Write-Host "[$renderer] the application is still running after 20 seconds"
+              }
+              try {
+                  $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+                  $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+                  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                  $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+                  $bitmap.Save((Join-Path (Get-Location) "screenshots\$renderer.png"))
+              } catch { Write-Host "[$renderer] no screenshot: $($_.Exception.Message)" }
+              # A venv's pythonw.exe starts the real interpreter as a child, so stop the whole process tree; otherwise
+              # the first window would still be on screen during the second launch. taskkill fails when part of the tree
+              # is already gone, and the step would take its exit code as its own: so it is run by cmd and forgotten.
+              if (-not $process.HasExited) {
+                  cmd /c "taskkill /PID $($process.Id) /T /F >nul 2>&1"; $global:LASTEXITCODE = 0
+              }
+              Start-Sleep -Seconds 3
+          }
+          $log = Join-Path $env:LOCALAPPDATA 'karamws\karamws.log'
+          if (Test-Path $log) {
+              Copy-Item $log screenshots\karamws.log
+              Write-Host '--- karamws.log'
+              Get-Content $log
+          }
+          if ($failed) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: launch-screenshots
+          path: screenshots/*
           if-no-files-found: ignore

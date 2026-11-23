@@ -4,6 +4,7 @@
 """Command-line adapter. All scraping logic lives in the rest of the package."""
 
 import argparse
+import sys
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,7 +17,8 @@ _INTERRUPTED_EXIT_CODE = 130
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    winsupport.prepare_runtime()  # on Windows: console-less streams and the bundled Visual C++ runtime; else a no-op
+    winsupport.prepare_runtime()
+    _make_output_safe()  # on Windows: console-less streams and the bundled Visual C++ runtime; else a no-op
     args = _parse_args(argv)
     config = ScraperConfig(
         request_delay_seconds=args.delay,
@@ -39,6 +41,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         counts[ScrapeStatus.SAVED] or counts[ScrapeStatus.SKIPPED]
     )
     return 1 if nothing_worked else 0
+
+
+def _make_output_safe() -> None:
+    """Never let the way a console is encoded stop the program.
+
+    A Windows pipe or redirect (and a CI runner) is encoded as cp1252, which has no Arabic letters: printing the name of
+    a file saved from an Arabic title would raise UnicodeEncodeError *after* the article was saved. What cannot be shown
+    is written as an escape (``\\u0645``) instead.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:

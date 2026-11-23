@@ -3,7 +3,13 @@
 
 """Which GTK release is used, and what the installer and the CI jobs leave behind when an installation fails."""
 
-from packaging_support import ROOT, WINDOWS
+import ast
+import json
+import re
+import subprocess
+
+import pytest
+from packaging_support import ROOT, WINDOWS, needs_pwsh
 
 
 def test_the_gtk_release_is_a_tested_one_and_not_the_newest():
@@ -76,3 +82,70 @@ def test_a_failing_native_command_is_never_the_exit_code_of_a_step_that_otherwis
     tree is already gone. That is a result here, not a failure."""
     checker = (WINDOWS / "check-installed.ps1").read_text(encoding="utf-8")
     assert "$global:LASTEXITCODE = 0" in checker.split('cmd /c "taskkill')[1].split("\n")[0]
+
+
+# --- the workflow itself ---
+
+def workflow_text() -> str:
+    return (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+
+def pwsh_steps() -> dict[str, str]:
+    """Every PowerShell step of the workflow, by job and name, as the script PowerShell is given."""
+    yaml = pytest.importorskip("yaml")
+    steps = {}
+    for job_name, job in yaml.safe_load(workflow_text())["jobs"].items():
+        for number, step in enumerate(job["steps"]):
+            if step.get("shell") == "pwsh" and "run" in step:
+                # GitHub fills the ${{ ... }} expressions in before PowerShell sees the script.
+                steps[f"{job_name} / {step.get('name', number)}"] = re.sub(r"\$\{\{.*?\}\}", "0", step["run"])
+    return steps
+
+
+@needs_pwsh
+def test_every_powershell_step_of_the_workflow_parses(tmp_path):
+    """A mistake in a step is only found by running the workflow, which costs a trip to GitHub: parse them here."""
+    (tmp_path / "steps.json").write_text(json.dumps(pwsh_steps()), encoding="utf-8")
+    parse = (
+        "$steps = Get-Content $args[0] -Raw | ConvertFrom-Json; $bad = 0\n"
+        "foreach ($step in $steps.PSObject.Properties) {\n"
+        "  $e = $null; $t = $null\n"
+        "  [System.Management.Automation.Language.Parser]::ParseInput($step.Value, [ref]$t, [ref]$e) | Out-Null\n"
+        "  if ($e.Count) { $bad++; Write-Output ('FAIL ' + $step.Name + ': ' + $e[0].Message) }\n"
+        "}\nif ($bad) { exit 1 }"
+    )
+    result = subprocess.run(["pwsh", "-NoProfile", "-Command", parse, str(tmp_path / "steps.json")],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_python_programs_inside_the_workflow_steps_are_valid_python():
+    for name, script in pwsh_steps().items():
+        for program in re.findall(r"@'\n(.*?)\n'@", script, re.S):
+            ast.parse(program)  # a SyntaxError here names the step in the traceback's locals; the loop shows which
+
+
+def test_the_full_install_job_is_manual_and_installs_with_nothing_carried_by_an_installer():
+    ci = workflow_text()
+    job = ci.split("  windows-full-install:")[1]
+    assert "github.event_name == 'workflow_dispatch'" in job.split("steps:")[0]
+    assert "timeout-minutes: 60" in job
+    # Nothing is skipped: GTK, Python's libraries and Chromium are all downloaded by the install script.
+    assert "./scripts/install-windows.ps1 -PythonVersion 3.14" in job and "-SkipBrowser" not in job
+    for step in ("The Start menu entry points at something that exists", "A real scrape on Windows",
+                 "Arabic letters in every path", "Test suite with the real libraries", "Launch the application"):
+        assert step in job, step
+
+
+def test_the_arabic_letters_check_puts_one_in_every_place_a_file_goes():
+    job = workflow_text().split("  windows-full-install:")[1]
+    for variable in ("$env:TEMP", "$env:XDG_DATA_HOME", "$env:XDG_CONFIG_HOME", "$env:PLAYWRIGHT_BROWSERS_PATH"):
+        assert variable in job, variable
+    assert "Copy-Item (Join-Path (Get-Location) 'browsers')" in job  # Chromium itself runs from the Arabic folder
+    assert "[char[]](0x0623, 0x062D, 0x0645, 0x062F)" in job  # no Arabic letters typed into the YAML
+
+
+def test_the_full_install_job_stops_what_it_started_and_ignores_taskkill_exit_codes():
+    job = workflow_text().split("  windows-full-install:")[1]
+    assert job.count("Stop-Process -Id $server.Id") == 2  # in a finally, so a failed step leaves no server behind
+    assert "$global:LASTEXITCODE = 0" in job.split('cmd /c "taskkill')[1].split("\n")[0]
