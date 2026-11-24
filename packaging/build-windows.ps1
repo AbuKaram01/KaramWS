@@ -50,9 +50,9 @@
     Stop the build, saying why, when Chromium could not be prepared, instead of building an installer without it
     (CI uses it).
 .PARAMETER NoVcRuntime
-    Build the installer without the Visual C++ runtime DLLs (msvcp140.dll ...) inside. Without them compiled
-    a compiled library that imports them (none does today; the copies are insurance for new versions) would need
-    the Visual C++ Redistributable on the machine where the application is installed.
+    Build the installer without the Visual C++ runtime DLLs (msvcp140.dll ...) inside. Without them the DLLs of the
+    GTK runtime (17 files of an installation import msvcp140.dll) need the Visual C++ Redistributable on the machine
+    where the application is installed.
 .PARAMETER RequireVcRuntime
     Stop the build, saying why, when those DLLs could not be collected, instead of building an installer without them
     (CI uses it).
@@ -192,8 +192,8 @@ function Add-VcRuntimeBundle {
         Remove-Item (Join-Path $PSScriptRoot 'vcruntime') -Recurse -Force
     }
     if ($NoVcRuntime) {
-        Write-Warning ('Building the installer WITHOUT the Visual C++ runtime DLLs; a compiled library that imports ' +
-                       'them would need the Visual C++ Redistributable on the machine where it is installed.')
+        Write-Warning ('Building the installer WITHOUT the Visual C++ runtime DLLs; the GTK runtime needs the ' +
+                       'Visual C++ Redistributable on the machine where it is installed.')
     } elseif (Get-VcRuntime -Target (Join-Path $PSScriptRoot 'vcruntime') -From $VcRuntimeDir) {
         Write-Host 'The Visual C++ runtime DLLs will be inside the installer.'
         Get-Content (Join-Path $PSScriptRoot 'vcruntime\versions.txt') | ForEach-Object { Write-Host "  $_" }

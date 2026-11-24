@@ -102,21 +102,55 @@ def pwsh_steps() -> dict[str, str]:
     return steps
 
 
+PARSE_STEPS = """\
+param([Parameter(Mandatory)][string]$StepsFile)
+$steps = Get-Content -LiteralPath $StepsFile -Raw | ConvertFrom-Json
+$checked = 0
+$bad = 0
+foreach ($step in $steps.PSObject.Properties) {
+    $errors = $null
+    $tokens = $null
+    [System.Management.Automation.Language.Parser]::ParseInput($step.Value, [ref]$tokens, [ref]$errors) | Out-Null
+    $checked++
+    if ($errors.Count) { $bad++; Write-Output ('FAIL ' + $step.Name + ': ' + $errors[0].Message) }
+}
+Write-Output "checked $checked steps"
+if ($checked -eq 0 -or $bad) { exit 1 }
+"""
+
+
+def parse_with_powershell(tmp_path, steps: dict[str, str]) -> subprocess.CompletedProcess:
+    """Run PowerShell's own parser over ``steps``.
+
+    The steps go in a file and the parser is run with ``-File``, so that the file name reaches the script as an
+    argument. (With ``-Command`` the name was added to the command line as a command of its own: on Linux PowerShell
+    then opened the document with xdg-open, which on a machine with a browser waits for ever, and the check checked
+    nothing.) Nothing can wait for an answer: no input is given and the run has a time limit.
+    """
+    (tmp_path / "steps.json").write_text(json.dumps(steps), encoding="utf-8")
+    (tmp_path / "parse.ps1").write_text(PARSE_STEPS, encoding="utf-8")
+    return subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-File", str(tmp_path / "parse.ps1"), str(tmp_path / "steps.json")],
+        capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL, timeout=120,
+    )
+
+
 @needs_pwsh
 def test_every_powershell_step_of_the_workflow_parses(tmp_path):
     """A mistake in a step is only found by running the workflow, which costs a trip to GitHub: parse them here."""
-    (tmp_path / "steps.json").write_text(json.dumps(pwsh_steps()), encoding="utf-8")
-    parse = (
-        "$steps = Get-Content $args[0] -Raw | ConvertFrom-Json; $bad = 0\n"
-        "foreach ($step in $steps.PSObject.Properties) {\n"
-        "  $e = $null; $t = $null\n"
-        "  [System.Management.Automation.Language.Parser]::ParseInput($step.Value, [ref]$t, [ref]$e) | Out-Null\n"
-        "  if ($e.Count) { $bad++; Write-Output ('FAIL ' + $step.Name + ': ' + $e[0].Message) }\n"
-        "}\nif ($bad) { exit 1 }"
-    )
-    result = subprocess.run(["pwsh", "-NoProfile", "-Command", parse, str(tmp_path / "steps.json")],
-                            capture_output=True, text=True, check=False)
+    steps = pwsh_steps()
+    assert len(steps) > 20  # the workflow really has that many; an empty result must not pass for a success
+    result = parse_with_powershell(tmp_path, steps)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert f"checked {len(steps)} steps" in result.stdout
+
+
+@needs_pwsh
+def test_the_check_of_the_steps_really_notices_a_broken_step(tmp_path):
+    """The check once passed without reading anything: prove that it fails when it should."""
+    result = parse_with_powershell(tmp_path, {"fine": "Write-Output 1", "broken": "if ($x { oops"})
+    assert result.returncode == 1
+    assert "FAIL broken" in result.stdout and "FAIL fine" not in result.stdout
 
 
 def test_the_python_programs_inside_the_workflow_steps_are_valid_python():
@@ -149,3 +183,17 @@ def test_the_full_install_job_stops_what_it_started_and_ignores_taskkill_exit_co
     job = workflow_text().split("  windows-full-install:")[1]
     assert job.count("Stop-Process -Id $server.Id") == 2  # in a finally, so a failed step leaves no server behind
     assert "$global:LASTEXITCODE = 0" in job.split('cmd /c "taskkill')[1].split("\n")[0]
+
+
+def test_the_helper_programs_of_the_full_install_job_are_not_written_into_the_checkout():
+    """A test of the checkout (every file of code has its license header) once found them there."""
+    job = workflow_text().split("  windows-full-install:")[1]
+    for name in ("browser_smoke.py", "build_site.py", "arabic_smoke.py"):
+        assert f"Set-Content (Join-Path $env:RUNNER_TEMP '{name}')" in job, name
+        assert f"Set-Content {name}" not in job
+
+
+def test_no_job_can_hold_up_the_run_for_ever():
+    yaml = pytest.importorskip("yaml")
+    for name, job in yaml.safe_load(workflow_text())["jobs"].items():
+        assert isinstance(job.get("timeout-minutes"), int), f"{name} has no timeout-minutes"

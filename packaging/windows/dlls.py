@@ -4,9 +4,10 @@
 r"""Which DLLs does an installed KaramWS need that nothing inside it provides?
 
 A machine that has never had the Microsoft Visual C++ Redistributable has no ``msvcp140.dll``. Python's own
-installer brings ``vcruntime140.dll``, but a compiled library may also import ``msvcp140.dll`` (none of the libraries
-of KaramWS does today), and Python then fails to import them with "DLL load failed". The CI machine has the
-Redistributable, so a program that starts there proves nothing about a clean machine. This script answers the
+installer brings ``vcruntime140.dll``, but ``msvcp140.dll`` is imported too: by the DLLs of the GTK runtime (cairo,
+pango, glib ...; a scan of a real installation found 17 files) and by any compiled library that uses the C++
+runtime. Python then fails to import them with "DLL load failed". The CI machine has the Redistributable,
+so a program that starts there proves nothing about a clean machine. This script answers the
 question without depending on what the machine has:
 
     python packaging\windows\dlls.py scan   --app <installation folder>   [--strict] [--json file] [--github]

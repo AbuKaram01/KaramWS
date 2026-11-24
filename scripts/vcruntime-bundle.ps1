@@ -5,9 +5,9 @@
 # collected so that packaging\build-windows.ps1 can put them inside the installer.
 #
 # Why: a computer that never had the Visual C++ Redistributable has no msvcp140.dll, and without it a compiled
-# library that imports it does not load. None of KaramWS's libraries does today (packaging\windows\dlls.py scan
-# says so), so this is insurance for new versions of them: the installer carries its own copies and the program
-# loads them first (src\karamws\winsupport.py).
+# library that imports it does not load. The DLLs of the GTK runtime (cairo, pango, glib ...) do: a scan of a real
+# installation (packaging\windows\dlls.py scan) found 17 files that import it. So the installer carries its own
+# copies and the program loads them first (src\karamws\winsupport.py).
 #
 # Dot-sourced by packaging\build-windows.ps1; use:
 #

@@ -19,6 +19,7 @@ jobs:
   # 7, so the tests that run the Windows scripts' functions run here too.
   linux:
     if: github.event_name != 'workflow_dispatch'
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
       - name: Python environment
         run: |
           python3 -m venv --system-site-packages .venv
-          .venv/bin/pip install pytest pyyaml trafilatura httpx playwright
+          .venv/bin/pip install pytest pytest-timeout pyyaml trafilatura httpx playwright
           .venv/bin/pip install --no-deps -e .
       - run: GSK_RENDERER=cairo xvfb-run -a .venv/bin/pytest -q
 
@@ -38,6 +39,7 @@ jobs:
   # nothing configured - the program has to find the Chromium that the package put beside its environment.
   linux-package:
     if: github.event_name != 'workflow_dispatch'
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -83,13 +85,14 @@ jobs:
   # mistakes on a real Windows file system. The GUI tests skip themselves here.
   windows-core:
     if: github.event_name != 'workflow_dispatch'
+    timeout-minutes: 20
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest pyyaml trafilatura httpx playwright
+      - run: pip install pytest pytest-timeout pyyaml trafilatura httpx playwright
       - run: pip install --no-deps -e .
       - run: pytest -q
 
@@ -101,6 +104,7 @@ jobs:
   # that is the mismatch.
   windows-gtk:
     if: github.event_name != 'workflow_dispatch'
+    timeout-minutes: 30
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -117,7 +121,7 @@ jobs:
       - name: Test
         shell: pwsh
         run: |
-          .venv\Scripts\python.exe -m pip install pytest
+          .venv\Scripts\python.exe -m pip install pytest pytest-timeout
           .venv\Scripts\python.exe -m pytest -q
 
   # Builds the Windows installer and checks what went into it: the GTK runtime, the Python installer, the Python
@@ -125,6 +129,7 @@ jobs:
   # windows-core job, so a broken Windows code base does not cost a build.
   installer:
     if: github.event_name != 'workflow_dispatch'
+    timeout-minutes: 45
     runs-on: windows-latest
     needs: windows-core
     steps:
@@ -362,8 +367,8 @@ jobs:
           print("chromium home:", chromium_home())
           assert "rendered by javascript" in html, html
           print("a JavaScript page is rendered with the Chromium the install script downloaded")
-          '@ | Set-Content browser_smoke.py -Encoding utf8
-          .venv\Scripts\python.exe browser_smoke.py
+          '@ | Set-Content (Join-Path $env:RUNNER_TEMP 'browser_smoke.py') -Encoding utf8
+          .venv\Scripts\python.exe (Join-Path $env:RUNNER_TEMP 'browser_smoke.py')
           if ($LASTEXITCODE -ne 0) { throw 'The program could not render a JavaScript page with its Chromium.' }
       - name: A real scrape on Windows (a small site with Arabic titles, a section and a JavaScript page)
         shell: pwsh
@@ -406,8 +411,8 @@ jobs:
           page("js/post", f"<html><head><title>{ARTICLE} js</title></head><body><div id='app'></div>"
                           f"<script>document.getElementById('app').innerHTML = {shell};</script></body></html>")
           print("site built in", root)
-          '@ | Set-Content build_site.py -Encoding utf8
-          & $python build_site.py $site
+          '@ | Set-Content (Join-Path $env:RUNNER_TEMP 'build_site.py') -Encoding utf8
+          & $python (Join-Path $env:RUNNER_TEMP 'build_site.py') $site
           $server = Start-Process -FilePath $python -PassThru -WindowStyle Hidden `
               -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $site
           Start-Sleep -Seconds 3
@@ -494,7 +499,7 @@ jobs:
           expect(all("This paragraph is long enough" in f.read_text(encoding="utf-8") for f in files), "the text of each is there")
 
           sys.exit(1 if problems else 0)
-          '@ | Set-Content arabic_smoke.py -Encoding utf8
+          '@ | Set-Content (Join-Path $env:RUNNER_TEMP 'arabic_smoke.py') -Encoding utf8
           $env:ARABIC_FOLDER = $arabic
           $env:TEMP = "$arabic\Temp"
           $env:TMP = $env:TEMP
@@ -505,7 +510,7 @@ jobs:
               -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $site
           Start-Sleep -Seconds 3
           try {
-              & $python arabic_smoke.py
+              & $python (Join-Path $env:RUNNER_TEMP 'arabic_smoke.py')
               if ($LASTEXITCODE -ne 0) {
                   throw 'Something does not work with Arabic letters in the paths; the list above says what.'
               }
@@ -516,7 +521,7 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         shell: pwsh
         run: |
-          .venv\Scripts\python.exe -m pip install --quiet pytest
+          .venv\Scripts\python.exe -m pip install --quiet pytest pytest-timeout
           .venv\Scripts\python.exe -m pytest -q
       - name: Launch the application
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}

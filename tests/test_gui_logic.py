@@ -69,10 +69,11 @@ def test_finish_headline():
     assert finish_headline(cancelled=False, error="disk full") == "Stopped by an error: disk full"
 
 
-def test_paths_inside_home_are_shortened():
-    home = Path("/home/me")
-    assert display_path(home / "Documents" / "Articles", home) == "~/Documents/Articles"
-    assert display_path(Path("/mnt/usb/articles"), home) == "/mnt/usb/articles"
+def test_paths_inside_home_are_shortened(tmp_path):
+    """Built from a real folder, so that it means the same on Windows, where the separator is a backslash."""
+    assert display_path(tmp_path / "Documents" / "Articles", tmp_path) == "~/Documents/Articles"
+    outside = tmp_path.parent / "elsewhere"
+    assert display_path(outside, tmp_path) == str(outside)
 
 
 def test_the_notification_says_how_it_went_and_with_what_result():

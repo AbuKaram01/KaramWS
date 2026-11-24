@@ -29,7 +29,7 @@ karamws = "karamws.cli:main"
 karamws-gui = "karamws.gui.application:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "pyyaml"]
+dev = ["pytest", "pytest-timeout", "ruff", "pyyaml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -37,6 +37,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# A test that waits for something that never comes must stop with a stack trace, not hold up the whole run.
+timeout = 300
 
 [tool.ruff]
 line-length = 120

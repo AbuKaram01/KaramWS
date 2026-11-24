@@ -83,7 +83,7 @@ def finish_notification(headline: str, counts: Counter[ScrapeStatus]) -> tuple[s
 def display_path(path: Path, home: Path) -> str:
     """Show paths the way a file manager does: ~/Documents/Articles."""
     try:
-        return f"~/{path.relative_to(home)}"
+        return f"~/{path.relative_to(home).as_posix()}"
     except ValueError:
         return str(path)
 

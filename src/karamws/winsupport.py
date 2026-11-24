@@ -104,10 +104,10 @@ def _load_library(path: Path) -> None:
 def configure_vcruntime(folder: Path) -> list[str]:
     """Make this process use the Visual C++ runtime DLLs of ``folder`` (``msvcp140.dll``, ``vcomp140.dll`` ...).
 
-    Compiled libraries may import ``msvcp140.dll``, which only a computer that has the Visual C++ Redistributable has
-    (none of the current ones does: ``packaging/windows/dlls.py scan`` says so; the copies are insurance for new
-    versions of them); the installer carries copies. They are loaded here, before any of
-    those libraries is imported: a library loaded later finds a DLL of that name already in the process and uses it,
+    The DLLs of the GTK runtime (cairo, pango, glib ...: 17 files, as ``packaging/windows/dlls.py scan`` finds) import
+    ``msvcp140.dll``, which only a computer that has the Visual C++ Redistributable has; the installer carries copies.
+    They are loaded here, before any of those libraries is imported: a library loaded later finds a DLL of that name
+    already in the process and uses it,
     so the copy that came with KaramWS is the one that runs, on a computer with or without the Redistributable (and
     one with an older Redistributable cannot give a library a runtime that is too old for it).
 
