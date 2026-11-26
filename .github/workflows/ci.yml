@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: System packages
         run: >-
           sudo apt-get update &&
@@ -42,7 +42,7 @@ jobs:
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the .deb
         run: ./packaging/build.sh
       - name: Install it
@@ -76,7 +76,7 @@ jobs:
         run: |
           sudo apt-get remove -y karamws
           test ! -e /opt/karamws
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: karamws-deb
           path: packaging/dist/*.deb
@@ -88,8 +88,8 @@ jobs:
     timeout-minutes: 20
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install pytest pytest-timeout pyyaml trafilatura httpx playwright
@@ -111,8 +111,8 @@ jobs:
       matrix:
         python: ["3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install GTK and the Python environment
@@ -133,9 +133,9 @@ jobs:
     runs-on: windows-latest
     needs: windows-core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The Python libraries inside the installer are collected with the Python of the GTK runtime.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install Inno Setup
@@ -189,7 +189,7 @@ jobs:
           "Chromium: {0:N0} MB unpacked" -f ($size / 1MB)
           $setup = Get-ChildItem packaging\dist\*.exe | Select-Object -First 1
           if ($setup.Length -lt $size / 8) { throw 'The installer is too small to contain Chromium.' }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: karamws-windows-setup
           path: packaging/dist/*.exe
@@ -206,8 +206,8 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install Inno Setup
@@ -295,7 +295,7 @@ jobs:
               throw ("A library failed to import or a Visual C++ runtime DLL came from the machine instead of the " +
                      "installation (exit code $LASTEXITCODE); the list is above.")
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: dll-scan
@@ -315,8 +315,8 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install everything (GTK, the libraries and Chromium are downloaded)
@@ -567,7 +567,7 @@ jobs:
               Get-Content $log
           }
           if ($failed) { exit 1 }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: launch-screenshots
